@@ -21,6 +21,7 @@ export function LoginScreen({ onNav }: LoginScreenProps) {
             alt="Covaulty"
             width={120}
             height={32}
+            style={{ height: "auto" }}
             unoptimized
           />
         </div>
@@ -60,9 +61,17 @@ export function LoginScreen({ onNav }: LoginScreenProps) {
 
       <div className="login-form-wrap">
         <div className="login-form">
-          <div className="brandrow">
-            <Logomark size={26} />
-            <span className="nm">Covaulty</span>
+          <div className="brandrow justify-center">
+            <div className="top-center">
+              <Image
+                src="/assets/logo-officiel-Covaulty.svg"
+                alt="Covaulty"
+                width={120}
+                height={32}
+                style={{ height: "auto" }}
+                unoptimized
+              />
+            </div>
           </div>
           <div className="h2" style={{ fontSize: 30, lineHeight: 1.1 }}>
             Bon retour.
