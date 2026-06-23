@@ -1,21 +1,42 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import { Ic } from "@/components/ui/Icons";
 import { Pagination } from "@/components/ui/Pagination";
 import { Topbar } from "@/components/layout/Topbar";
 import { CollecteDetailModal } from "@/components/modals/CollecteDetailModal";
 import { fcfa } from "@/utils/fcfa";
-import { collectesData } from "@/data/collectes";
-import { CollecteRow } from "@/types/collecte";
+import { initials } from "@/utils/initials";
+import { CollectionTransaction } from "@/types/collection.types";
+import { collectionService } from "@/services/collection.service";
 
 const PAGE_SIZE = 12;
 
 export function CollectesScreen() {
-  const [open, setOpen] = useState<CollecteRow | null>(null);
+  const [open, setOpen] = useState<CollectionTransaction | null>(null);
   const [search, setSearch] = useState("");
   const [statut, setStatut] = useState<"all" | "ok" | "sync">("all");
   const [page, setPage] = useState(1);
+  const [loading, setLoading] = useState(true);
+  const [transactions, setTransactions] = useState<CollectionTransaction[]>([]);
+
+  const fetchCollectes = async () => {
+    try {
+      setLoading(true);
+      // Récupère uniquement les dépôts par défaut
+      const res: any = await collectionService.getTransactions({ type: "DEPOSIT" });
+      setTransactions(Array.isArray(res) ? res : (res.data || []));
+    } catch (err) {
+      console.error(err);
+      setTransactions([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchCollectes();
+  }, []);
 
   function reset() {
     setSearch("");
@@ -23,25 +44,34 @@ export function CollectesScreen() {
     setPage(1);
   }
 
+  const list = Array.isArray(transactions) ? transactions : [];
+
   const filtered = useMemo(() => {
-    return collectesData.filter((r) => {
+    return list.filter((r) => {
       const q = search.toLowerCase();
+      const p = r.receiptPayload || {};
+      const agentName = (p.agentName || "").toLowerCase();
+      const clientName = (p.clientName || "").toLowerCase();
+      const localRef = (p.localRef || r.id).toLowerCase();
+      
       const matchSearch =
         q === "" ||
-        r.c.toLowerCase().includes(q) ||
-        r.a.toLowerCase().includes(q) ||
-        r.r.toLowerCase().includes(q) ||
-        r.z.toLowerCase().includes(q);
-      const matchStatut = statut === "all" || r.st === statut;
+        agentName.includes(q) ||
+        clientName.includes(q) ||
+        localRef.includes(q);
+        
+      // Tout ce qui vient de l'API centrale est considéré "ok" (synchronisé)
+      const isOk = true;
+      const matchStatut = statut === "all" || (statut === "ok" && isOk) || (statut === "sync" && !isOk);
       return matchSearch && matchStatut;
     });
-  }, [search, statut]);
+  }, [search, statut, list]);
 
   const paginated = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
-  const totalCollecte = collectesData.reduce((s, r) => s + r.m, 0);
-  const agentsActifs = new Set(collectesData.map((r) => r.ai)).size;
-  const totalDepots = collectesData.length;
+  const totalCollecte = list.reduce((s, r) => s + (typeof r.amount === "number" ? r.amount : parseFloat(r.amount as string) || 0), 0);
+  const agentsActifs = new Set(list.map((r) => r.receiptPayload?.agentName || "Inconnu")).size;
+  const totalDepots = list.length;
 
   const hasFilters = search !== "" || statut !== "all";
 
@@ -50,14 +80,14 @@ export function CollectesScreen() {
       <Topbar
         crumb={["Dashboard", "Collectes du jour"]}
         title="Collectes du jour"
-        sub={`21 mai 2026 · ${totalDepots} dépôts · ${fcfa(totalCollecte)} encaissés`}
+        sub={`${new Date().toLocaleDateString("fr-FR")} · ${totalDepots} dépôts · ${fcfa(totalCollecte)} encaissés`}
         actions={
           <>
-            <button className="btn btn-ghost btn-sm">
-              <Ic.Download /> Exporter CSV
+            <button className="btn btn-ghost btn-sm" onClick={fetchCollectes}>
+              <Ic.Refresh /> Actualiser
             </button>
             <button className="btn btn-ghost btn-sm">
-              <Ic.Print /> Imprimer rapport
+              <Ic.Download /> Exporter CSV
             </button>
           </>
         }
@@ -109,7 +139,7 @@ export function CollectesScreen() {
           ))}
         </div>
         <button className="chip">
-          <Ic.Calendar /> 21 mai 2026
+          <Ic.Calendar /> Aujourd'hui
         </button>
         <div className="spacer" />
         {hasFilters && (
@@ -142,14 +172,17 @@ export function CollectesScreen() {
 
       <div className="content">
         <div className="card" style={{ padding: 0 }}>
+          {loading ? (
+             <div className="p-8 text-center muted">Chargement de l'historique de collecte...</div>
+          ) : (
+          <>
           <table className="tbl">
             <thead>
               <tr>
-                <th>Réf</th>
+                <th>Réf Locale</th>
                 <th>Heure</th>
                 <th>Agent</th>
                 <th>Client</th>
-                <th>Zone</th>
                 <th className="num">Montant</th>
                 <th>Mode</th>
                 <th>Statut</th>
@@ -160,69 +193,72 @@ export function CollectesScreen() {
               {paginated.length === 0 ? (
                 <tr>
                   <td
-                    colSpan={9}
+                    colSpan={8}
                     style={{
                       textAlign: "center",
                       padding: "32px 0",
                       color: "var(--ink-3)",
                     }}
                   >
-                    Aucune collecte ne correspond aux filtres
+                    Aucune collecte trouvée
                   </td>
                 </tr>
               ) : (
-                paginated.map((r, i) => (
-                  <tr
-                    key={i}
-                    onClick={() => setOpen(r)}
-                    style={{ cursor: "pointer" }}
-                  >
-                    <td className="mono">#{r.r}</td>
-                    <td className="muted tnum">{r.h}</td>
-                    <td>
-                      <div
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          gap: 8,
-                        }}
-                      >
-                        <div className="av sm">{r.ai}</div>
-                        {r.a}
-                      </div>
-                    </td>
-                    <td>{r.c}</td>
-                    <td className="muted">{r.z}</td>
-                    <td className="num tnum fw-600 text-accent">
-                      {fcfa(r.m, { sign: true })}
-                    </td>
-                    <td className="muted">{r.md}</td>
-                    <td>
-                      {r.st === "ok" ? (
+                paginated.map((r) => {
+                  const p = r.receiptPayload || {};
+                  const localRef = p.localRef || r.id.substring(0,8);
+                  const agentName = p.agentName || "Inconnu";
+                  const clientName = p.clientName || "Inconnu";
+                  const dateStr = p.date ? new Date(p.date).toLocaleTimeString("fr-FR", { hour: "2-digit", minute: "2-digit" }) : "--:--";
+                  const amountNum = typeof r.amount === "number" ? r.amount : parseFloat(r.amount as string) || 0;
+
+                  return (
+                    <tr
+                      key={r.id}
+                      onClick={() => setOpen(r)}
+                      style={{ cursor: "pointer" }}
+                    >
+                      <td className="mono">#{localRef}</td>
+                      <td className="muted tnum">{dateStr}</td>
+                      <td>
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          <div className="av sm">{initials(agentName)}</div>
+                          {agentName}
+                        </div>
+                      </td>
+                      <td>{clientName}</td>
+                      <td className="num tnum fw-600 text-accent">
+                        {fcfa(amountNum, { sign: true })}
+                      </td>
+                      <td className="muted">ESPECE</td>
+                      <td>
                         <span className="pill good">
                           <span className="dot" /> Confirmé
                         </span>
-                      ) : (
-                        <span className="pill warn">
-                          <span className="dot" /> En attente sync.
-                        </span>
-                      )}
-                    </td>
-                    <td>
-                      <button
-                        className="btn-icon"
-                        title="Voir le détail"
-                        style={{ color: "var(--ink-3)" }}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setOpen(r);
-                        }}
-                      >
-                        <Ic.Eye />
-                      </button>
-                    </td>
-                  </tr>
-                ))
+                      </td>
+                      <td>
+                        <button
+                          className="btn-icon"
+                          aria-label="Voir les détails de la collecte"
+                          title="Voir le détail"
+                          style={{ color: "var(--ink-3)" }}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setOpen(r);
+                          }}
+                        >
+                          <Ic.Eye />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })
               )}
             </tbody>
           </table>
@@ -232,6 +268,8 @@ export function CollectesScreen() {
             pageSize={PAGE_SIZE}
             onChange={setPage}
           />
+          </>
+          )}
         </div>
       </div>
 

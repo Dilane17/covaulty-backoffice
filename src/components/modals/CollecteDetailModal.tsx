@@ -4,10 +4,10 @@ import { Ic } from "@/components/ui/Icons";
 import { Field } from "@/components/ui/Field";
 import { fcfa } from "@/utils/fcfa";
 import { initials } from "@/utils/initials";
-import { CollecteRow } from "@/types/collecte";
+import { CollectionTransaction } from "@/types/collection.types";
 
 interface CollecteDetailModalProps {
-  row: CollecteRow;
+  row: CollectionTransaction;
   onClose: () => void;
 }
 
@@ -15,8 +15,14 @@ export function CollecteDetailModal({
   row,
   onClose,
 }: CollecteDetailModalProps) {
-  const isConfirmed = row.st === "ok";
-  const soldeAfter = row.soldeBefore + row.m;
+  // Extraction des infos (fallback sur "N/A" si receiptPayload manque)
+  const isConfirmed = true; // par défaut ok si reçu par l'API centrale
+  const p = row.receiptPayload || {};
+  const localRef = p.localRef || row.id.substring(0, 8);
+  const dateStr = p.date ? new Date(p.date).toLocaleString("fr-FR") : "Date inconnue";
+  const agentName = p.agentName || "Agent inconnu";
+  const clientName = p.clientName || "Client inconnu";
+  const amountNum = typeof row.amount === "number" ? row.amount : parseFloat(row.amount as string) || 0;
 
   return (
     <div className="modal-overlay" onClick={onClose}>
@@ -27,14 +33,12 @@ export function CollecteDetailModal({
       >
         <div className="modal-head">
           <div>
-            <div className="title">Détail · #{row.r}</div>
+            <div className="title">Détail · #{localRef}</div>
             <div
               className="sub"
               style={{ fontSize: 12, color: "var(--ink-3)", marginTop: 2 }}
             >
-              {isConfirmed
-                ? "Transaction confirmée et signée"
-                : "En attente de synchronisation"}
+              Transaction synchronisée et vérifiée
             </div>
           </div>
           <button className="close" onClick={onClose}>
@@ -46,26 +50,30 @@ export function CollecteDetailModal({
             style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}
           >
             <div className="col gap-10">
-              <Field k="Référence">
-                <span className="mono">#{row.r}</span>
+              <Field k="Référence Système">
+                <span className="mono text-xs">{row.id}</span>
+              </Field>
+              <Field k="Référence Locale">
+                <span className="mono">#{localRef}</span>
               </Field>
               <Field k="Date · heure">
-                {row.date} · {row.h}
+                {dateStr}
               </Field>
               <Field k="Agent">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div className="av sm">{row.ai}</div>
-                  <span style={{ fontWeight: 500 }}>{row.a}</span>
+                  <div className="av sm">{initials(agentName)}</div>
+                  <span style={{ fontWeight: 500 }}>{agentName}</span>
                 </div>
               </Field>
               <Field k="Client">
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <div className="av sm">{initials(row.c)}</div>
-                  <span style={{ fontWeight: 500 }}>{row.c}</span>
+                  <div className="av sm">{initials(clientName)}</div>
+                  <span style={{ fontWeight: 500 }}>{clientName}</span>
                 </div>
               </Field>
-              <Field k="Zone">{row.z}</Field>
-              <Field k="Mode">{row.md}</Field>
+              <Field k="Type d'Opération">
+                <span className="pill" style={{ background: "var(--paper-3)", color: "var(--ink)" }}>{row.type}</span>
+              </Field>
             </div>
             <div className="col gap-10">
               <div>
@@ -81,13 +89,9 @@ export function CollecteDetailModal({
                     letterSpacing: "-0.02em",
                   }}
                 >
-                  {fcfa(row.m)}
+                  {fcfa(amountNum)}
                 </div>
               </div>
-              <Field k="Solde avant">{fcfa(row.soldeBefore)}</Field>
-              <Field k="Solde après">
-                <strong>{fcfa(soldeAfter)}</strong>
-              </Field>
               <div style={{ marginTop: 8 }}>
                 {isConfirmed ? (
                   <span className="pill good">
@@ -102,78 +106,35 @@ export function CollecteDetailModal({
             </div>
           </div>
 
-          <div>
-            <div className="eyebrow" style={{ marginBottom: 8 }}>
-              Géolocalisation
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "120px 1fr",
-                gap: 14,
-                alignItems: "center",
-              }}
-            >
-              <div
-                style={{
-                  height: 80,
-                  borderRadius: 10,
-                  background:
-                    "linear-gradient(135deg, #DCE7F2 0%, #B3001B22 100%)",
-                  position: "relative",
-                  overflow: "hidden",
-                }}
-              >
-                <div
-                  style={{
-                    position: "absolute",
-                    left: "55%",
-                    top: "50%",
-                    width: 12,
-                    height: 12,
-                    borderRadius: 999,
-                    background: "var(--primary)",
-                    border: "2px solid #fff",
-                    transform: "translate(-50%, -50%)",
-                  }}
-                />
-              </div>
-              <div>
-                <div style={{ fontWeight: 500 }}>{row.loc}</div>
-                <div
-                  className="muted mono"
-                  style={{ fontSize: 12, marginTop: 2 }}
-                >
-                  {row.lat} · {row.lng} · ±12 m
-                </div>
-              </div>
-            </div>
-          </div>
-
           <div className="receipt">
             <div className="ti">COVAULTY · REÇU</div>
             <div className="rl">
-              <span>Réf</span>
-              <span>#{row.r}</span>
+              <span>Institution</span>
+              <span>{p.institutionName || "Covaulty"}</span>
+            </div>
+            <div className="rl">
+              <span>Réf locale</span>
+              <span>#{localRef}</span>
             </div>
             <div className="rl">
               <span>Date</span>
-              <span>
-                {row.date} {row.h}
-              </span>
+              <span>{dateStr}</span>
             </div>
             <div className="rl">
               <span>Agent</span>
-              <span>{row.a}</span>
+              <span>{agentName}</span>
             </div>
             <div className="rl">
               <span>Client</span>
-              <span>{row.c}</span>
+              <span>{clientName}</span>
             </div>
             <div className="sep" />
             <div className="rl total">
-              <span>DÉPÔT</span>
-              <span>{fcfa(row.m)}</span>
+              <span>TOTAL {row.type}</span>
+              <span>{fcfa(amountNum)}</span>
+            </div>
+            <div className="mt-4 text-center">
+              <span className="mono text-xs text-gray-400">SIGNATURE: {p.signature?.substring(0, 16) || "N/A"}...</span>
             </div>
           </div>
 

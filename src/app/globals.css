@@ -1647,7 +1647,7 @@ select {
   font-family: var(--font);
 }
 .chart-svg .tip {
-  fill: var(--carbon);
+  fill: var(--primary);
 }
 .chart-svg .tip-text {
   fill: #fff;

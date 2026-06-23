@@ -21,10 +21,11 @@ export function LineChart({
   const w = width,
     h = height;
   const xs = data.map(
-    (_, i) => pad.l + (i * (w - pad.l - pad.r)) / (data.length - 1),
+    (_, i) => pad.l + (i * (w - pad.l - pad.r)) / Math.max(1, data.length - 1),
   );
   const ys = data.map((d) => d.y);
-  const yMax = Math.max(...ys) * 1.15;
+  const yMaxRaw = Math.max(...ys) * 1.15;
+  const yMax = yMaxRaw <= 0 ? 1 : yMaxRaw;
   const yMin = 0;
   const yScale = (y: number) =>
     h - pad.b - ((y - yMin) / (yMax - yMin)) * (h - pad.t - pad.b);
@@ -89,7 +90,7 @@ export function LineChart({
         </text>
       ))}
       <g transform={`translate(${tipX}, ${tipY - 28})`}>
-        <rect className="tip" x="-32" y="-18" width="64" height="22" rx="6" />
+        <rect className="tip" x="-40" y="-18" width="80" height="22" rx="6" />
         <text className="tip-text" textAnchor="middle" y="-3">
           {data[tipIdx].tip || `${data[tipIdx].y} M F`}
         </text>

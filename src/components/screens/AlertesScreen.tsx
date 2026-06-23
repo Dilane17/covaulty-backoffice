@@ -1,42 +1,113 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Ic } from "@/components/ui/Icons";
 import { DropChip } from "@/components/ui/DropChip";
 import { CounterTile } from "@/components/ui/Field";
 import { Topbar } from "@/components/layout/Topbar";
+import { alertService } from "@/services/alert.service";
+import { Alert } from "@/types/alert.types";
+
+const TAB_MAPPING: Record<string, string | undefined> = {
+  "Toutes": undefined,
+  "Ouvertes": "OPEN",
+  "En cours": "IN_PROGRESS",
+  "Résolues": "RESOLVED"
+};
 
 export function AlertesScreen() {
   const [tab, setTab] = useState("Toutes");
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Pour les compteurs (facultatif si l'API ne donne pas les totaux on peut les approximer ou juste enlever le hardcode)
+  // On va simplement faire une agrégation si on est sur "Toutes", sinon on laisse les compteurs bruts.
+  const [openCount, setOpenCount] = useState(0);
+
+  const fetchAlerts = async (statusFilter?: string) => {
+    try {
+      setLoading(true);
+      const res = await alertService.getAlerts(statusFilter);
+      const list: Alert[] = Array.isArray(res) ? res : ((res as unknown as {data: Alert[]}).data || []);
+      setAlerts(list);
+
+      // Si on charge tout, on met à jour le openCount pour les compteurs
+      if (!statusFilter) {
+        setOpenCount(list.filter(a => a.status === "OPEN").length);
+      }
+    } catch (err) {
+      console.error(err);
+      setAlerts([]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchAlerts(TAB_MAPPING[tab]);
+  }, [tab]);
+
+  const handleResolve = async (id: string) => {
+    try {
+      await alertService.resolveAlert(id);
+      fetchAlerts(TAB_MAPPING[tab]); // Refresh after resolve
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { code?: string, message?: string } } };
+      if (axiosErr.response?.data?.code === "ALERT_001") {
+        window.alert("Alerte introuvable.");
+      } else {
+        window.alert(axiosErr.response?.data?.message || "Erreur lors de la résolution de l'alerte.");
+      }
+    }
+  };
+
+  const getAlertClasses = (a: Alert) => {
+    if (a.status === "RESOLVED") {
+      return { card: "alert-card ok", tag: "alert-tag ok", kind: "alert-tag kind-ok", dot: "bg-[var(--accent)]" };
+    }
+    if (a.severity === "CRITICAL") {
+      return { card: "alert-card crit", tag: "alert-tag crit", kind: "alert-tag kind", dot: "bg-[var(--primary)]" };
+    }
+    return { card: "alert-card warn", tag: "alert-tag warn", kind: "alert-tag kind-warn", dot: "bg-[var(--warn)]" };
+  };
+
+  const getTimeLabel = (dateStr: string) => {
+    const d = new Date(dateStr);
+    const diff = Math.floor((new Date().getTime() - d.getTime()) / 60000); // minutes
+    if (diff < 60) return `Il y a ${diff} min`;
+    if (diff < 1440) return `Il y a ${Math.floor(diff / 60)} h`;
+    return `Il y a ${Math.floor(diff / 1440)} j`;
+  };
 
   return (
     <>
       <Topbar
         crumb={["Dashboard", "Alertes"]}
         title="Alertes"
-        badge={<span className="pill bad" style={{ marginLeft: 12 }}>3 ouvertes</span>}
+        badge={openCount > 0 ? <span className="pill bad ml-3">{openCount} ouvertes</span> : undefined}
         actions={
           <>
-            <button className="btn btn-ghost btn-sm"><Ic.Check /> Tout marquer résolu</button>
-            <button className="btn btn-ghost btn-sm"><Ic.Cog /> Règles d&apos;alerte</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => fetchAlerts(TAB_MAPPING[tab])}><Ic.Refresh /> Actualiser</button>
+            <button className="btn btn-ghost btn-sm"><Ic.Cog /> Règles d'alerte</button>
           </>
         }
       />
 
-      <div style={{ background: "#fff", borderBottom: "1px solid var(--line)", padding: "20px 28px", display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 16 }}>
-        <CounterTile color="var(--primary)" big="3"  small="Ouvertes"       icon={<Ic.Alert />} />
-        <CounterTile color="var(--warn)"    big="8"  small="En cours"       icon={<Ic.Refresh />} />
-        <CounterTile color="var(--accent)"  big="47" small="Résolues (30j)" icon={<Ic.Check />} />
+      {/* Stats row - on garde les tuiles existantes mais on met le vrai openCount */}
+      <div className="bg-white border-b border-[var(--line)] p-5 px-7 grid grid-cols-4 gap-4">
+        <CounterTile color="var(--primary)" big={openCount.toString()}  small="Ouvertes"       icon={<Ic.Alert />} />
+        <CounterTile color="var(--warn)"    big="-"  small="En cours"       icon={<Ic.Refresh />} />
+        <CounterTile color="var(--accent)"  big="-" small="Résolues (30j)" icon={<Ic.Check />} />
         <CounterTile color="var(--ink-3)"   big="5"  small="Règles actives" icon={<Ic.Cog />} />
       </div>
 
-      <div className="filter-bar" style={{ background: "var(--paper)", borderBottom: 0, padding: "12px 28px" }}>
+      <div className="filter-bar bg-[var(--paper)] border-b-0 py-3 px-7">
         <div className="tabs">
-          {["Toutes", "Ouvertes", "En cours", "Résolues"].map((t) => (
+          {Object.keys(TAB_MAPPING).map((t) => (
             <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
               {t}
-              {t === "Ouvertes" && (
-                <span style={{ marginLeft: 6, background: "var(--primary)", color: "#fff", padding: "1px 6px", borderRadius: 999, fontSize: 10 }}>3</span>
+              {t === "Ouvertes" && openCount > 0 && (
+                <span className="ml-1.5 bg-[var(--primary)] text-white px-1.5 py-px rounded-full text-[10px]">{openCount}</span>
               )}
             </button>
           ))}
@@ -46,75 +117,50 @@ export function AlertesScreen() {
         <DropChip label="Tous agents" />
       </div>
 
-      <div className="content" style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        <div className="alert-card crit">
-          <div className="alert-tagrow">
-            <span className="alert-tag crit"><span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--primary)" }} /> CRITIQUE</span>
-            <span className="alert-tag kind">Écart de caisse</span>
-            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>Il y a 3 min</span>
+      <div className="content flex flex-col gap-3">
+        {loading ? (
+          <div className="p-8 text-center muted">Chargement des alertes...</div>
+        ) : alerts.length === 0 ? (
+          <div className="p-8 text-center text-[var(--good)] bg-[var(--paper)] rounded-xl flex items-center justify-center gap-2 border border-[var(--line)]">
+            <Ic.Check /> Aucune alerte pour ce filtre.
           </div>
-          <h3>Écart de 3 500 F détecté — Agent Boris K.</h3>
-          <div className="det">Total déclaré 14 500 F · Total reversé 11 000 F · Écart <strong style={{ color: "var(--primary)" }}>−3 500 F</strong></div>
-          <div className="alert-actions">
-            <button className="btn btn-primary btn-sm"><Ic.Phone /> Contacter l&apos;agent</button>
-            <button className="btn btn-ghost btn-sm"><Ic.Exchange /> Voir les transactions</button>
-            <button className="btn btn-ghost btn-sm" style={{ color: "var(--ink-3)" }}>Marquer résolu</button>
-          </div>
-        </div>
-
-        <div className="alert-card warn">
-          <div className="alert-tagrow">
-            <span className="alert-tag warn"><span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--warn)" }} /> ATTENTION</span>
-            <span className="alert-tag kind-warn">Hors-zone</span>
-            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>Il y a 18 min</span>
-          </div>
-          <h3>Jean M. détecté hors de sa zone assignée</h3>
-          <div className="det">Zone assignée : <strong>Cadjehoun</strong> · Position actuelle : <strong>Akpakpa</strong> (4,2 km d&apos;écart)</div>
-          <div style={{ height: 50, borderRadius: 8, background: "var(--paper-3)", position: "relative", overflow: "hidden" }}>
-            <svg viewBox="0 0 200 50" preserveAspectRatio="none" style={{ width: "100%", height: "100%" }}>
-              <path d="M 0 25 Q 50 5, 100 25 T 200 25" stroke="rgba(38,38,38,0.10)" strokeWidth="1" fill="none" />
-              <line x1="50" y1="25" x2="150" y2="25" stroke="var(--warn)" strokeDasharray="3 3" strokeWidth="1" />
-              <circle cx="50" cy="25" r="4" fill="var(--accent)" />
-              <circle cx="150" cy="25" r="4" fill="var(--primary)" />
-              <text x="48" y="42" fontSize="9" fill="var(--ink-3)">Zone</text>
-              <text x="148" y="42" fontSize="9" fill="var(--ink-3)">Pos.</text>
-            </svg>
-          </div>
-          <div className="alert-actions">
-            <button className="btn btn-primary btn-sm"><Ic.Map /> Voir sur la carte</button>
-            <button className="btn btn-ghost btn-sm" style={{ color: "var(--ink-3)" }}>Ignorer</button>
-          </div>
-        </div>
-
-        <div className="alert-card warn">
-          <div className="alert-tagrow">
-            <span className="alert-tag warn"><span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--warn)" }} /> ATTENTION</span>
-            <span className="alert-tag kind-warn">Double collecte</span>
-            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>Il y a 1 h</span>
-          </div>
-          <h3>Possible doublon — M. Adjovi K. collecté 2 fois à 09:12</h3>
-          <div className="det">
-            Réf <strong>#CV-0912</strong> · 2 000 F · 09:12:38 &nbsp;et&nbsp;
-            Réf <strong>#CV-0918</strong> · 2 000 F · 09:12:51 — même client, même montant
-          </div>
-          <div className="alert-actions">
-            <button className="btn btn-primary btn-sm">Comparer les transactions</button>
-            <button className="btn btn-ghost btn-sm">Valider doublon</button>
-            <button className="btn btn-ghost btn-sm" style={{ color: "var(--ink-3)" }}>Ignorer</button>
-          </div>
-        </div>
-
-        <div className="section-rule">Alertes résolues (48h)</div>
-
-        <div className="alert-card ok">
-          <div className="alert-tagrow">
-            <span className="alert-tag ok"><span style={{ width: 6, height: 6, borderRadius: 999, background: "var(--accent)" }} /> RÉSOLUE</span>
-            <span className="alert-tag kind-ok">Sync offline</span>
-            <span className="muted" style={{ fontSize: 12, marginLeft: "auto" }}>Résolue il y a 2 h</span>
-          </div>
-          <h3>4 dépôts hors-ligne synchronisés avec succès — Rachelle T.</h3>
-          <div className="det">4 dépôts · 9 500 F · Sync. automatique 2G à 11:34</div>
-        </div>
+        ) : (
+          alerts.map(a => {
+            const { card, tag, kind, dot } = getAlertClasses(a);
+            
+            return (
+              <div key={a.id} className={card}>
+                <div className="alert-tagrow">
+                  <span className={tag}>
+                    <span className={`w-1.5 h-1.5 rounded-full ${dot}`} />
+                    {a.status === "RESOLVED" ? "RÉSOLUE" : a.severity === "CRITICAL" ? "CRITIQUE" : "ATTENTION"}
+                  </span>
+                  <span className={kind}>{a.type || "Alerte"}</span>
+                  <span className="muted ml-auto text-xs">{getTimeLabel(a.createdAt)}</span>
+                </div>
+                
+                <h3>{a.message}</h3>
+                <div className="det text-xs mt-1 text-[var(--ink-2)]">
+                  ID de référence : <strong className="font-mono">{a.id}</strong>
+                </div>
+                
+                <div className="alert-actions mt-4 flex gap-2">
+                  {a.status !== "RESOLVED" && (
+                    <>
+                      <button className="btn btn-primary btn-sm" onClick={() => handleResolve(a.id)}>
+                        <Ic.Check /> Marquer résolu
+                      </button>
+                      <button className="btn btn-ghost btn-sm text-[var(--ink-3)]">Ignorer</button>
+                    </>
+                  )}
+                  {a.status === "RESOLVED" && (
+                    <button className="btn btn-ghost btn-sm text-[var(--ink-3)]">Voir les détails</button>
+                  )}
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     </>
   );

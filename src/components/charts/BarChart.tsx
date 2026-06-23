@@ -17,10 +17,11 @@ export function BarChart({
 }: BarChartProps) {
   const pad = { l: 36, r: 16, t: 16, b: 30 };
   const w = width, h = height;
-  const groupW = (w - pad.l - pad.r) / data.length;
+  const groupW = data.length > 0 ? (w - pad.l - pad.r) / data.length : 0;
   const barW = groupW * 0.32;
   const ys = data.flatMap((d) => [d.y1, d.y2 || 0]);
-  const yMax = Math.max(...ys) * 1.15;
+  const yMaxRaw = Math.max(...ys, 0) * 1.15;
+  const yMax = yMaxRaw <= 0 ? 1 : yMaxRaw;
   const yScale = (y: number) => h - pad.b - (y / yMax) * (h - pad.t - pad.b);
 
   return (

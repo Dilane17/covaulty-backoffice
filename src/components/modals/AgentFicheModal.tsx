@@ -35,18 +35,16 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div
-        className="modal"
-        style={{ maxWidth: 720 }}
+        className="modal max-w-[720px]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="modal-head brand">
           <div
-            className="av lg"
-            style={{ background: "var(--primary)", color: "#fff" }}
+            className="av lg bg-primary text-white"
           >
             {a.i}
           </div>
-          <div style={{ flex: 1 }}>
+          <div className="flex-1">
             <div className="title">{a.n}</div>
             <div className="sub">Agent terrain · {a.z}</div>
           </div>
@@ -54,23 +52,13 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
             <span className="dot" /> {status.label}
           </span>
           <button
-            className="btn btn-ghost btn-sm"
-            style={{
-              background: "transparent",
-              color: "rgba(255,255,255,0.9)",
-              borderColor: "rgba(255,255,255,0.2)",
-            }}
+            className="btn btn-ghost btn-sm bg-transparent text-[rgba(255,255,255,0.9)] border border-[rgba(255,255,255,0.2)]"
             onClick={onEdit}
           >
             Modifier
           </button>
           <button
-            className="btn btn-sm"
-            style={{
-              background: "transparent",
-              color: "rgba(255,255,255,0.9)",
-              border: "1px solid rgba(255,255,255,0.2)",
-            }}
+            className="btn btn-sm bg-transparent text-[rgba(255,255,255,0.9)] border border-[rgba(255,255,255,0.2)]"
           >
             Désactiver
           </button>
@@ -79,13 +67,9 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
           </button>
         </div>
         <div className="modal-body">
-          <div
-            style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 28 }}
-          >
+          <div className="grid grid-cols-2 gap-7">
             <div>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>
-                Informations
-              </div>
+              <div className="eyebrow mb-2">Statistiques Terrain</div>
               <div className="col gap-10">
                 <Field k="Téléphone">{a.tel}</Field>
                 <Field k="Email">{a.em}</Field>
@@ -96,15 +80,9 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
               </div>
             </div>
             <div>
-              <div className="eyebrow" style={{ marginBottom: 10 }}>
-                Performance aujourd&apos;hui
-              </div>
+              <div className="eyebrow mb-2">Performance aujourd&apos;hui</div>
               <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "1fr 1fr",
-                  gap: 8,
-                }}
+                className="grid grid-cols-2 gap-2"
               >
                 <KpiSm v={a.d} l="Dépôts" />
                 <KpiSm v={fcfa(a.c)} l="Collecté" />
@@ -112,9 +90,7 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
                 <KpiSm v={a.alerts30d} l="Alertes 30j" />
               </div>
               <div className="mt-16">
-                <div className="eyebrow" style={{ marginBottom: 8 }}>
-                  7 derniers jours
-                </div>
+                <div className="eyebrow mb-2">Équipement</div>
                 <LineChart
                   data={a.weeklyData}
                   width={400}
@@ -161,15 +137,13 @@ export function AgentFicheModal({ a, onClose, onEdit }: AgentFicheModalProps) {
 
           <div className="between">
             <div>
-              <div className="eyebrow" style={{ marginBottom: 6 }}>
-                Score crédit agent
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <div className="eyebrow mb-1">Caisse Agent</div>
+              <div className="flex items-center gap-2">
                 <Stars value={Math.round(a.rt)} />
-                <span style={{ fontSize: 20, fontWeight: 600 }}>
+                <span className="text-xl font-semibold">
                   {a.rt.toFixed(1)} / 5.0
                 </span>
-                <span className="muted" style={{ fontSize: 12 }}>
+                <span className="muted text-xs">
                   · Sur 84 retours clients
                 </span>
               </div>

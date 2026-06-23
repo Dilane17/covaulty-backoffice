@@ -1,150 +1,73 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
 import maplibregl from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import { Ic } from "@/components/ui/Icons";
-import { Stat } from "@/components/ui/Stat";
 import { Topbar } from "@/components/layout/Topbar";
-import { AgentFicheModal } from "@/components/modals/AgentFicheModal";
 import { fcfa } from "@/utils/fcfa";
-import { mapAgentsData, agentsData } from "@/data/agents";
-import { MapAgent } from "@/types/agent";
+
+import { agencyService } from "@/services/agency.service";
+import { userService } from "@/services/user.service";
+import { trackingService, AgentLocationHistory } from "@/services/tracking.service";
 
 const MAP_STYLE = "https://demotiles.maplibre.org/style.json";
 const COTONOU_CENTER: [number, number] = [2.45, 6.42];
-const DEFAULT_ZOOM = 11;
+const DEFAULT_ZOOM = 12;
 
-function getMarkerColor(st: MapAgent["st"], isActive: boolean): string {
-  if (isActive) return "#B3001B";
-  if (st === "on") return "#255C99";
-  if (st === "off") return "#e07b00";
-  return "#6b6b6b";
-}
-
-function AgentListItem({
-  a,
-  active,
-  onClick,
-}: {
-  a: MapAgent;
-  active: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <div
-      onClick={onClick}
-      style={{
-        display: "grid",
-        gridTemplateColumns: "36px 1fr auto",
-        gap: 10,
-        padding: "10px 12px",
-        borderRadius: 10,
-        background: active ? "var(--primary-50)" : "transparent",
-        borderLeft: active
-          ? "3px solid var(--primary)"
-          : "3px solid transparent",
-        cursor: "pointer",
-        alignItems: "center",
-      }}
-    >
-      <div className="av" style={{ width: 36, height: 36, fontSize: 13 }}>
-        {a.i}
-      </div>
-      <div style={{ minWidth: 0 }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-          <strong style={{ fontSize: 13 }}>{a.n}</strong>
-          <span className="muted" style={{ fontSize: 11 }}>
-            · {a.z.split(" ")[0]}
-          </span>
-        </div>
-        <div
-          className="muted"
-          style={{
-            fontSize: 11,
-            marginTop: 2,
-            whiteSpace: "nowrap",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-          }}
-        >
-          {a.last}
-        </div>
-        <div style={{ marginTop: 6 }}>
-          {a.st === "on" && (
-            <span className="pill live">
-              <span className="dot" /> Sur le terrain
-            </span>
-          )}
-          {a.st === "off" && (
-            <span className="pill warn">
-              <span className="dot" /> Inactif
-            </span>
-          )}
-          {a.st === "ofl" && (
-            <span className="pill off">
-              <span className="dot" /> Hors-ligne
-            </span>
-          )}
-        </div>
-      </div>
-      <div
-        className="tnum"
-        style={{
-          fontSize: 12,
-          fontWeight: 600,
-          color: a.c ? "var(--ink)" : "var(--ink-3)",
-        }}
-      >
-        {fcfa(a.c)}
-      </div>
-    </div>
-  );
-}
+// TODO Phase 7 : Connexion Socket.io pour le tracking live
+// Événement à écouter : 'agent:location:update'
+// Payload : { agentId, latitude, longitude, batteryLevel }
+// Room : institutionId ou agencyId
+// Ref : docs/tracking/workflow.md
 
 export function MapScreen() {
-  const [active, setActive] = useState("KA");
-  const [missionOnly, setMissionOnly] = useState(false);
+  const [agencies, setAgencies] = useState<any[]>([]);
+  const [agents, setAgents] = useState<any[]>([]);
+  const [activeAgentId, setActiveAgentId] = useState<string | null>(null);
+  const [date, setDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [history, setHistory] = useState<AgentLocationHistory[]>([]);
   const [search, setSearch] = useState("");
-  const [ficheOpen, setFicheOpen] = useState(false);
-
+  
   const mapContainer = useRef<HTMLDivElement>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
   const markersRef = useRef<Map<string, maplibregl.Marker>>(new Map());
 
-  const activeAgent =
-    mapAgentsData.find((a) => a.i === active) || mapAgentsData[0];
-  const activeFicheAgent = agentsData.find((a) => a.i === active);
-
-  const actifs = mapAgentsData.filter((a) => a.st === "on");
-  const inactifs = mapAgentsData.filter(
-    (a) => a.st === "off" || a.st === "ofl",
-  );
-
-  const filterList = (list: MapAgent[]) =>
-    list.filter(
-      (a) =>
-        search === "" ||
-        a.n.toLowerCase().includes(search.toLowerCase()) ||
-        a.z.toLowerCase().includes(search.toLowerCase()),
-    );
-
-  const visibleActifs = filterList(missionOnly ? actifs : actifs);
-  const visibleInactifs = filterList(missionOnly ? [] : inactifs);
-
-  const handleSelectAgent = useCallback((id: string) => {
-    setActive(id);
-    const agent = mapAgentsData.find((a) => a.i === id);
-    if (agent && mapRef.current) {
-      mapRef.current.flyTo({
-        center: [agent.lng, agent.lat],
-        zoom: 14,
-        duration: 800,
-      });
-    }
+  // Init data
+  useEffect(() => {
+    const fetchBaseData = async () => {
+      try {
+        const [agRes, usrRes] = await Promise.all([
+          agencyService.getAll().catch(() => []),
+          userService.getAll({ role: "AGENT", isActive: true }).catch(() => [])
+        ]);
+        setAgencies(Array.isArray(agRes) ? agRes : (agRes as any).data || []);
+        setAgents(Array.isArray(usrRes) ? usrRes : (usrRes as any).data || []);
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    fetchBaseData();
   }, []);
 
-  // Init map
+  // Tracking history
+  useEffect(() => {
+    if (!activeAgentId) {
+      setHistory([]);
+      return;
+    }
+    const fetchHistory = async () => {
+      try {
+        const res = await trackingService.getHistory(activeAgentId, date).catch(() => []);
+        setHistory(Array.isArray(res) ? res : (res as any).data || []);
+      } catch (err) {
+        setHistory([]);
+      }
+    };
+    fetchHistory();
+  }, [activeAgentId, date]);
+
+  // Map Initialization
   useEffect(() => {
     if (!mapContainer.current || mapRef.current) return;
 
@@ -157,87 +80,102 @@ export function MapScreen() {
     });
 
     map.addControl(new maplibregl.NavigationControl(), "bottom-right");
-
-    map.on("load", () => {
-      // Add markers for each agent
-      mapAgentsData.forEach((a) => {
-        const el = document.createElement("div");
-        el.style.cssText = `
-          width: 38px; height: 38px; border-radius: 50%;
-          background: ${getMarkerColor(a.st, a.i === "KA")};
-          border: 3px solid #fff;
-          display: flex; align-items: center; justify-content: center;
-          font-size: 11px; font-weight: 700; color: #fff;
-          cursor: pointer; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
-          transition: transform 0.2s ease, box-shadow 0.2s ease;
-        `;
-        el.textContent = a.i;
-
-        el.addEventListener("click", (e) => {
-          e.stopPropagation();
-          handleSelectAgent(a.i);
-        });
-
-        const marker = new maplibregl.Marker({ element: el })
-          .setLngLat([a.lng, a.lat])
-          .addTo(map);
-
-        markersRef.current.set(a.i, marker);
-      });
-    });
-
     mapRef.current = map;
 
     return () => {
       map.remove();
       mapRef.current = null;
-      markersRef.current.clear();
     };
-  }, [handleSelectAgent]);
+  }, []);
 
-  // Update markers style + tournee on active change
+  // Update Agencies Markers
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || agencies.length === 0) return;
+
+    markersRef.current.forEach(m => m.remove());
+    markersRef.current.clear();
+
+    agencies.forEach((ag, i) => {
+      // Mock coordinates near Cotonou for display if API doesn't provide them
+      const lng = (ag.longitude != null) ? ag.longitude : COTONOU_CENTER[0] + (i * 0.015) - 0.02;
+      const lat = (ag.latitude != null) ? ag.latitude : COTONOU_CENTER[1] + (i * 0.015) - 0.02;
+
+      const el = document.createElement("div");
+      el.style.cssText = `
+        width: 32px; height: 32px; border-radius: 8px;
+        background: var(--primary);
+        border: 2px solid #fff;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; box-shadow: 0 4px 14px rgba(0,0,0,0.35);
+        cursor: pointer;
+      `;
+      el.innerHTML = `<svg width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M3 21h18M5 21V5a2 2 0 012-2h10a2 2 0 012 2v16M9 21v-4a2 2 0 012-2h2a2 2 0 012 2v4"/></svg>`;
+
+      const popup = new maplibregl.Popup({ offset: 25 }).setHTML(`
+        <div style="padding: 4px; font-family: Inter, sans-serif;">
+          <strong style="color: var(--ink)">${ag.name}</strong><br/>
+          <div style="font-size: 11px; color: var(--ink-3); margin-bottom: 8px;">${ag.address || 'Adresse inconnue'}</div>
+          <div style="font-size: 12px; color: var(--ink-3);">Chargement...</div>
+        </div>
+      `);
+
+      el.addEventListener("click", async () => {
+        try {
+          const detail = await agencyService.getById(ag.id);
+          const agentCount = agents.filter(a => a.agencyId === ag.id).length;
+          popup.setHTML(`
+            <div style="padding: 4px; font-family: Inter, sans-serif;">
+              <strong style="color: var(--ink)">${ag.name}</strong><br/>
+              <div style="font-size: 11px; color: var(--ink-3); margin-bottom: 8px;">${ag.address || 'Adresse inconnue'}</div>
+              <div style="font-size: 12px; margin-bottom: 4px;"><strong>Agents rattachés:</strong> ${agentCount}</div>
+              <div style="font-size: 12px;"><strong>Solde agence:</strong> ${fcfa(detail.walletBalance || 0)}</div>
+            </div>
+          `);
+        } catch (err) {
+          popup.setHTML(`
+            <div style="padding: 4px; font-family: Inter, sans-serif;">
+              <strong style="color: var(--ink)">${ag.name}</strong><br/>
+              <div style="font-size: 11px; color: var(--ink-3); margin-bottom: 8px;">${ag.address || 'Adresse inconnue'}</div>
+              <div style="font-size: 12px; color: var(--warn);">Erreur de chargement des détails</div>
+            </div>
+          `);
+        }
+      });
+
+      const marker = new maplibregl.Marker({ element: el })
+        .setLngLat([lng, lat])
+        .setPopup(popup)
+        .addTo(map);
+
+      markersRef.current.set(ag.id, marker);
+    });
+  }, [agencies, agents]);
+
+  // Draw History Trace
   useEffect(() => {
     const map = mapRef.current;
     if (!map) return;
 
-    // Update marker styles
-    markersRef.current.forEach((marker, id) => {
-      const el = marker.getElement();
-      const isActive = id === active;
-      const agent = mapAgentsData.find((a) => a.i === id);
-      if (!agent) return;
-      el.style.background = getMarkerColor(agent.st, isActive);
-      el.style.transform = isActive ? "scale(1.3)" : "scale(1)";
-      el.style.boxShadow = isActive
-        ? "0 6px 20px rgba(179,0,27,0.5)"
-        : "0 4px 14px rgba(0,0,0,0.35)";
-      el.style.zIndex = isActive ? "10" : "1";
-    });
-
-    // Wait for style to be loaded before adding layers
     if (!map.isStyleLoaded()) {
-      map.once("idle", () => updateTournee(map));
+      map.once("idle", draw);
     } else {
-      updateTournee(map);
+      draw();
     }
 
-    function updateTournee(m: maplibregl.Map) {
-      const ids = [
-        "tournee-stops-labels",
-        "tournee-stops-layer",
-        "tournee-line-layer",
-      ];
+    function draw() {
+      const ids = ["history-stops-labels", "history-stops-layer", "history-line-layer"];
       ids.forEach((id) => {
-        if (m.getLayer(id)) m.removeLayer(id);
+        if (map!.getLayer(id)) map!.removeLayer(id);
       });
-      ["tournee-line", "tournee-stops"].forEach((id) => {
-        if (m.getSource(id)) m.removeSource(id);
+      ["history-line", "history-stops"].forEach((id) => {
+        if (map!.getSource(id)) map!.removeSource(id);
       });
 
-      if (activeAgent.tournee.length > 1) {
-        const coordinates = activeAgent.tournee.map((s) => [s.lng, s.lat]);
+      if (history.length > 0) {
+        const coordinates = history.map((h) => [h.longitude, h.latitude]);
 
-        m.addSource("tournee-line", {
+        map!.addSource("history-line", {
           type: "geojson",
           data: {
             type: "Feature",
@@ -246,10 +184,10 @@ export function MapScreen() {
           },
         });
 
-        m.addLayer({
-          id: "tournee-line-layer",
+        map!.addLayer({
+          id: "history-line-layer",
           type: "line",
-          source: "tournee-line",
+          source: "history-line",
           paint: {
             "line-color": "#B3001B",
             "line-width": 3,
@@ -257,22 +195,24 @@ export function MapScreen() {
           },
         });
 
-        m.addSource("tournee-stops", {
+        map!.addSource("history-stops", {
           type: "geojson",
           data: {
             type: "FeatureCollection",
-            features: activeAgent.tournee.map((s) => ({
+            features: history.map((h) => ({
               type: "Feature" as const,
-              properties: { n: String(s.n) },
-              geometry: { type: "Point" as const, coordinates: [s.lng, s.lat] },
+              properties: { 
+                n: new Date(h.timestamp).toLocaleTimeString("fr-FR", { hour: '2-digit', minute: '2-digit' }) 
+              },
+              geometry: { type: "Point" as const, coordinates: [h.longitude, h.latitude] },
             })),
           },
         });
 
-        m.addLayer({
-          id: "tournee-stops-layer",
+        map!.addLayer({
+          id: "history-stops-layer",
           type: "circle",
-          source: "tournee-stops",
+          source: "history-stops",
           paint: {
             "circle-radius": 7,
             "circle-color": "#B3001B",
@@ -281,10 +221,10 @@ export function MapScreen() {
           },
         });
 
-        m.addLayer({
-          id: "tournee-stops-labels",
+        map!.addLayer({
+          id: "history-stops-labels",
           type: "symbol",
-          source: "tournee-stops",
+          source: "history-stops",
           layout: {
             "text-field": ["get", "n"],
             "text-size": 11,
@@ -296,26 +236,31 @@ export function MapScreen() {
             "text-halo-width": 1.5,
           },
         });
+
+        // Zoom to fit bounds
+        if (coordinates.length > 1) {
+          const bounds = new maplibregl.LngLatBounds(coordinates[0] as [number, number], coordinates[0] as [number, number]);
+          coordinates.forEach(coord => bounds.extend(coord as [number, number]));
+          map!.fitBounds(bounds, { padding: 60, duration: 800 });
+        } else if (coordinates.length === 1) {
+          map!.flyTo({ center: coordinates[0] as [number, number], zoom: 15, duration: 800 });
+        }
       }
     }
-  }, [active, activeAgent]);
+  }, [history]);
+
+  const visibleAgents = agents.filter(
+    (a) =>
+      search === "" ||
+      `${a.firstName} ${a.lastName}`.toLowerCase().includes(search.toLowerCase())
+  );
 
   return (
     <>
       <Topbar
-        crumb={["Dashboard", "Carte agents"]}
-        title="Carte agents"
-        sub={`${actifs.length} agents sur le terrain · Temps réel`}
-        actions={
-          <>
-            <span className="pill live">
-              <span className="dot" /> Live
-            </span>
-            <button className="btn btn-ghost btn-sm">
-              <Ic.Refresh /> Actualiser
-            </button>
-          </>
-        }
+        crumb={["Dashboard", "Tracking terrain"]}
+        title="Tracking terrain"
+        sub={`${agents.length} agents au total · Historique consolidé`}
       />
       <div
         className="content flush"
@@ -341,8 +286,21 @@ export function MapScreen() {
             }}
           >
             <div className="h4" style={{ marginBottom: 10 }}>
-              Agents
+              Sélecteur d'Agent
             </div>
+            
+            <div className="field" style={{ marginBottom: 12 }}>
+              <label htmlFor="map-date">Date de suivi</label>
+              <div className="input">
+                <input 
+                  id="map-date"
+                  type="date" 
+                  value={date} 
+                  onChange={(e) => setDate(e.target.value)} 
+                />
+              </div>
+            </div>
+
             <div className="searchbar">
               <span className="ic">
                 <Ic.Search />
@@ -353,43 +311,6 @@ export function MapScreen() {
                 onChange={(e) => setSearch(e.target.value)}
               />
             </div>
-            <div
-              style={{
-                display: "inline-flex",
-                marginTop: 12,
-                gap: 4,
-                padding: 3,
-                borderRadius: 999,
-                background: "var(--paper-3)",
-              }}
-            >
-              <button
-                onClick={() => setMissionOnly(true)}
-                className="tab"
-                style={{
-                  background: missionOnly ? "#fff" : "transparent",
-                  color: missionOnly ? "var(--ink)" : "var(--ink-3)",
-                  boxShadow: missionOnly
-                    ? "0 1px 2px rgba(0,0,0,0.06)"
-                    : "none",
-                }}
-              >
-                En mission
-              </button>
-              <button
-                onClick={() => setMissionOnly(false)}
-                className="tab"
-                style={{
-                  background: !missionOnly ? "#fff" : "transparent",
-                  color: !missionOnly ? "var(--ink)" : "var(--ink-3)",
-                  boxShadow: !missionOnly
-                    ? "0 1px 2px rgba(0,0,0,0.06)"
-                    : "none",
-                }}
-              >
-                Tous
-              </button>
-            </div>
           </div>
           <div
             style={{
@@ -399,37 +320,43 @@ export function MapScreen() {
               gap: 4,
             }}
           >
-            {visibleActifs.length > 0 && (
-              <>
-                <div className="eyebrow" style={{ padding: "6px 10px" }}>
-                  Actifs · {actifs.length}
+            {visibleAgents.map((a) => {
+              const isActive = a.id === activeAgentId;
+              const agency = agencies.find(ag => ag.id === a.agencyId);
+              return (
+                <div
+                  key={a.id}
+                  onClick={() => setActiveAgentId(a.id)}
+                  style={{
+                    display: "flex",
+                    gap: 10,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: isActive ? "var(--primary-50)" : "transparent",
+                    borderLeft: isActive
+                      ? "3px solid var(--primary)"
+                      : "3px solid transparent",
+                    cursor: "pointer",
+                    alignItems: "center",
+                  }}
+                >
+                  <div className="av" style={{ width: 36, height: 36, fontSize: 13 }}>
+                    {a.firstName[0]}{a.lastName?.[0] || ""}
+                  </div>
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      <strong style={{ fontSize: 13, textOverflow: "ellipsis", whiteSpace: "nowrap", overflow: "hidden" }}>
+                        {a.firstName} {a.lastName}
+                      </strong>
+                    </div>
+                    <div className="muted" style={{ fontSize: 11, marginTop: 2 }}>
+                      {agency?.name || "Sans agence"}
+                    </div>
+                  </div>
                 </div>
-                {visibleActifs.map((a) => (
-                  <AgentListItem
-                    key={a.i}
-                    a={a}
-                    active={a.i === active}
-                    onClick={() => handleSelectAgent(a.i)}
-                  />
-                ))}
-              </>
-            )}
-            {visibleInactifs.length > 0 && (
-              <>
-                <div className="eyebrow" style={{ padding: "10px 10px 6px" }}>
-                  Inactifs · {inactifs.length}
-                </div>
-                {visibleInactifs.map((a) => (
-                  <AgentListItem
-                    key={a.i}
-                    a={a}
-                    active={a.i === active}
-                    onClick={() => handleSelectAgent(a.i)}
-                  />
-                ))}
-              </>
-            )}
-            {visibleActifs.length === 0 && visibleInactifs.length === 0 && (
+              );
+            })}
+            {visibleAgents.length === 0 && (
               <div
                 className="muted"
                 style={{
@@ -446,74 +373,26 @@ export function MapScreen() {
 
         <div style={{ position: "relative", width: "100%", height: "100%" }}>
           <div ref={mapContainer} style={{ width: "100%", height: "100%" }} />
-
-          <div className="map-agent-card">
-            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-              <div
-                className="av lg"
-                style={{ background: "var(--primary)", color: "#fff" }}
-              >
-                {activeAgent.i}
+          
+          {activeAgentId && (
+            <div className="map-agent-card" style={{ bottom: 24, left: 24, right: "auto", top: "auto", position: "absolute", background: "#fff", padding: 20, borderRadius: 16, boxShadow: "0 10px 30px rgba(0,0,0,0.1)", zIndex: 100, width: 300 }}>
+              <div className="h4" style={{ marginBottom: 4 }}>Historique de la tournée</div>
+              <div className="muted" style={{ fontSize: 12, marginBottom: 12 }}>{new Date(date).toLocaleDateString("fr-FR")}</div>
+              
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderTop: "1px solid var(--line)" }}>
+                <span className="muted" style={{ fontSize: 13 }}>Points enregistrés</span>
+                <span className="fw-600">{history.length}</span>
               </div>
-              <div style={{ flex: 1 }}>
-                <div className="h3" style={{ fontSize: 18 }}>
-                  {activeAgent.n}
+              
+              {history.length === 0 && (
+                <div style={{ fontSize: 12, color: "var(--warn)", marginTop: 8, background: "var(--warn-50)", padding: "8px 12px", borderRadius: 8 }}>
+                  Aucune donnée GPS trouvée pour cette date.
                 </div>
-                <div className="muted" style={{ fontSize: 12 }}>
-                  {activeAgent.z}
-                  {activeAgent.tournee.length > 0 &&
-                    ` · Tournée ${activeAgent.tournee.length} arrêts`}
-                </div>
-              </div>
+              )}
             </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, 1fr)",
-                gap: 8,
-                padding: "14px 0",
-                borderTop: "1px solid var(--line)",
-                borderBottom: "1px solid var(--line)",
-                marginTop: 14,
-              }}
-            >
-              <Stat v={activeAgent.deps} l="Dépôts" />
-              <Stat v={fcfa(activeAgent.c)} l="Collecté" big />
-              <Stat v={`${activeAgent.obj}%`} l="Objectif" />
-            </div>
-            <div className="muted" style={{ fontSize: 12, marginTop: 10 }}>
-              <div>Dernière position</div>
-              <div
-                style={{ color: "var(--ink)", marginTop: 2, fontWeight: 500 }}
-              >
-                {activeAgent.lastPos}
-              </div>
-            </div>
-            {activeFicheAgent && (
-              <button
-                className="btn btn-ghost btn-sm"
-                style={{
-                  marginTop: 14,
-                  color: "var(--primary)",
-                  border: "1px solid var(--primary-200)",
-                  justifyContent: "center",
-                  width: "100%",
-                }}
-                onClick={() => setFicheOpen(true)}
-              >
-                Voir la fiche complète <Ic.Arrow />
-              </button>
-            )}
-          </div>
+          )}
         </div>
       </div>
-
-      {ficheOpen && activeFicheAgent && (
-        <AgentFicheModal
-          a={activeFicheAgent}
-          onClose={() => setFicheOpen(false)}
-        />
-      )}
     </>
   );
 }

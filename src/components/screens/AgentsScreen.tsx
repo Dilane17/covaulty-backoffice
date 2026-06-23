@@ -1,188 +1,142 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Ic } from "@/components/ui/Icons";
 import { DropChip } from "@/components/ui/DropChip";
-import { Stars } from "@/components/ui/Stars";
 import { Stat } from "@/components/ui/Stat";
 import { Topbar } from "@/components/layout/Topbar";
-import { AgentFicheModal } from "@/components/modals/AgentFicheModal";
-import {
-  AgentFormModal,
-  AgentFormData,
-} from "@/components/modals/AgentFormModal";
-import { fcfa } from "@/utils/fcfa";
-import { agentsData } from "@/data/agents";
-import { Agent } from "@/types/agent";
+import { AgentFormModal } from "@/components/modals/AgentFormModal";
+import { User, CreateUserPayload } from "@/types/user.types";
+import { userService } from "@/services/user.service";
 
 export function AgentsScreen() {
-  const [open, setOpen] = useState<Agent | null>(null);
-  // null = formulaire création ouvert · Agent = formulaire édition ouvert · undefined = fermé
-  const [editTarget, setEditTarget] = useState<Agent | null | undefined>(
-    undefined,
-  );
+  const [users, setUsers] = useState<User[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [editTarget, setEditTarget] = useState<User | null | undefined>(undefined);
 
-  function openCreateForm() {
-    setEditTarget(null);
-  }
+  const fetchUsers = async () => {
+    try {
+      setLoading(true);
+      const res: any = await userService.getAll();
+      setUsers(Array.isArray(res) ? res : (res.data || []));
+    } catch (err) {
+      console.error(err);
+      setUsers([]);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-  function openEditForm(agent: Agent) {
-    setOpen(null);
-    setEditTarget(agent);
-  }
+  useEffect(() => {
+    fetchUsers();
+  }, []);
 
-  function closeForm() {
-    setEditTarget(undefined);
-  }
+  const handleSaveAgent = async (data: CreateUserPayload) => {
+    if (editTarget) {
+      await userService.create(data); 
+      setEditTarget(undefined);
+      fetchUsers();
+      return null;
+    } else {
+      const res = await userService.create(data);
+      fetchUsers();
+      return res;
+    }
+  };
 
-  function handleSaveAgent(data: AgentFormData) {
-    console.log("[TODO] Sauvegarder agent via API:", data);
-    setEditTarget(undefined);
-  }
+  const list = Array.isArray(users) ? users : [];
 
   return (
     <>
       <Topbar
-        crumb={["Dashboard", "Agents"]}
-        title="Agents"
-        sub="22 agents · 18 actifs"
+        crumb={["Dashboard", "Staff"]}
+        title="Agents & Managers"
+        sub={`${list.length} collaborateurs`}
         actions={
-          <button className="btn btn-primary btn-sm" onClick={openCreateForm}>
-            <Ic.Plus /> Ajouter un agent
+          <button className="btn btn-primary btn-sm" onClick={() => setEditTarget(null)}>
+            <Ic.Plus /> Ajouter un compte
           </button>
         }
       />
 
       <div className="filter-bar" style={{ justifyContent: "space-between" }}>
-        <div
-          style={{ display: "flex", gap: 10, alignItems: "center", flex: 1 }}
-        >
+        <div style={{ display: "flex", gap: 10, alignItems: "center", flex: 1 }}>
           <div className="searchbar">
-            <span className="ic">
-              <Ic.Search />
-            </span>
-            <input placeholder="Nom, zone, code…" />
+            <span className="ic"><Ic.Search /></span>
+            <input placeholder="Nom, email, rôle…" />
           </div>
-          <DropChip label="Toutes les zones" />
+          <DropChip label="Tous les rôles" />
           <DropChip label="Tous statuts" />
         </div>
         <div style={{ display: "flex", gap: 24 }}>
-          <Stat v="22" l="Total" />
-          <Stat v="18" l="Actifs" />
-          <Stat v="82%" l="Objectif moyen" />
+          <Stat v={list.length.toString()} l="Total" />
+          <Stat v={list.filter(u => u.isActive).length.toString()} l="Actifs" />
+          <Stat v={list.filter(u => u.role === "AGENT").length.toString()} l="Agents terrain" />
         </div>
       </div>
 
       <div className="content">
-        <div className="agents-grid">
-          {agentsData.map((a) => (
-            <div className="agent-card" key={a.i}>
-              <div className="head">
-                <div
-                  className="av"
-                  style={{ width: 48, height: 48, fontSize: 16 }}
-                >
-                  {a.i}
+        {loading ? (
+          <div className="card text-center p-8 muted">Chargement du staff...</div>
+        ) : (
+          <div className="agents-grid">
+            {list.length === 0 && (
+              <div className="card text-center p-8 muted" style={{ gridColumn: "1 / -1" }}>Aucun collaborateur trouvé.</div>
+            )}
+            {list.map((u) => (
+              <div className="agent-card" key={u.id}>
+                <div className="head">
+                  <div className="av" style={{ width: 48, height: 48, fontSize: 16 }}>
+                    {u.firstName?.[0] || ""}{u.lastName?.[0] || ""}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div className="nm">{u.firstName} {u.lastName}</div>
+                    <div className="zn" style={{ fontSize: 11, textTransform: "uppercase" }}>{u.role}</div>
+                  </div>
+                  {u.isActive ? (
+                    <span className="pill live"><span className="dot" /> Actif</span>
+                  ) : (
+                    <span className="pill warn"><span className="dot" /> Inactif</span>
+                  )}
                 </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="nm">{a.n}</div>
-                  <div className="zn">{a.z}</div>
-                </div>
-                {a.s === "on" && (
-                  <span className="pill live">
-                    <span className="dot" /> Actif
-                  </span>
-                )}
-                {a.s === "off" && (
-                  <span className="pill warn">
-                    <span className="dot" /> Inactif
-                  </span>
-                )}
-                {a.s === "ofl" && (
-                  <span className="pill off">
-                    <span className="dot" /> Hors-ligne
-                  </span>
-                )}
-              </div>
 
-              <div className="metrics">
-                <div>
-                  <div className="v tnum">{a.d}</div>
-                  <div className="l">Dépôts j.</div>
+                <div className="metrics" style={{ gridTemplateColumns: "1fr 1fr" }}>
+                  <div>
+                    <div className="v tnum" style={{ fontSize: 14 }}>{u.email}</div>
+                    <div className="l">Email de connexion</div>
+                  </div>
+                  <div>
+                    <div className="v tnum" style={{ fontSize: 14 }}>{u.agentCode || "N/A"}</div>
+                    <div className="l">Code Agent</div>
+                  </div>
                 </div>
-                <div>
-                  <div className="v tnum">{fcfa(a.c)}</div>
-                  <div className="l">Collecté j.</div>
-                </div>
-                <div>
-                  <div className="v tnum">{a.o}%</div>
-                  <div className="l">Objectif</div>
-                </div>
-              </div>
 
-              <div className="bar full">
-                <span style={{ width: `${a.o}%` }} />
-              </div>
-
-              <div
-                className="between"
-                style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12 }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                  <Stars value={Math.round(a.rt)} />
-                  <span style={{ fontSize: 12, fontWeight: 500 }}>
-                    {a.rt.toFixed(1)}
-                  </span>
-                  <span className="muted" style={{ fontSize: 11 }}>
-                    · {a.dj} j. actifs
-                  </span>
+                <div className="between" style={{ borderTop: "1px solid var(--line-2)", paddingTop: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <span className="muted" style={{ fontSize: 12 }}>
+                      Date de création : {new Date(u.createdAt || Date.now()).toLocaleDateString("fr-FR")}
+                    </span>
+                  </div>
                 </div>
-                <span className="pill off" style={{ fontSize: 11 }}>
-                  {a.lastSync}
-                </span>
-              </div>
 
-              <div className="actions">
-                <button
-                  className="btn btn-primary btn-sm"
-                  style={{ flex: 1, justifyContent: "center" }}
-                  onClick={() => setOpen(a)}
-                >
-                  Voir la fiche <Ic.Arrow />
-                </button>
-                <a
-                  href={`tel:${a.tel}`}
-                  className="btn-icon"
-                  title={`Appeler ${a.n}`}
-                  style={{
-                    width: 36,
-                    height: 36,
-                    border: "1px solid var(--line-strong)",
-                    borderRadius: 999,
-                    color: "var(--ink-2)",
-                    display: "grid",
-                    placeItems: "center",
-                  }}
-                >
-                  <Ic.Phone />
-                </a>
+                <div className="actions" style={{ display: "flex", gap: 8 }}>
+                  <button className="btn btn-ghost btn-sm" style={{ flex: 1, justifyContent: "center" }} onClick={() => setEditTarget(u)}>
+                    Modifier le compte <Ic.Arrow />
+                  </button>
+                  <button className="btn btn-primary btn-sm" style={{ flex: 1, justifyContent: "center" }} onClick={() => window.location.hash = `#transactions?agentId=${u.id}`}>
+                    <span style={{ transform: "scale(0.85)", display: "flex" }}><Ic.ArrowUp /></span> Voir ses collectes
+                  </button>
+                </div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
-      {open && (
-        <AgentFicheModal
-          a={open}
-          onClose={() => setOpen(null)}
-          onEdit={() => openEditForm(open)}
-        />
-      )}
       {editTarget !== undefined && (
         <AgentFormModal
           agent={editTarget ?? undefined}
-          onClose={closeForm}
+          onClose={() => setEditTarget(undefined)}
           onSave={handleSaveAgent}
         />
       )}

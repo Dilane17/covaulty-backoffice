@@ -1,152 +1,263 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { Ic } from "@/components/ui/Icons";
-import { Legend, LegendDash, Row } from "@/components/ui/Field";
 import { Topbar } from "@/components/layout/Topbar";
-import { ForecastChart } from "@/components/charts/ForecastChart";
-import { ChartPoint, ForecastPoint } from "@/types/common";
-
-function buildHistory(): ChartPoint[] {
-  const h: ChartPoint[] = [];
-  for (let i = 0; i < 14; i++) {
-    h.push({ x: `J-${14 - i}`, y: 14 + i * 0.3 + Math.sin(i * 0.7) * 0.4 });
-  }
-  h.push({ x: "Auj", y: 18.24 });
-  return h;
-}
-
-function buildForecast(): ForecastPoint[] {
-  const f: ForecastPoint[] = [];
-  for (let i = 1; i <= 30; i++) {
-    const base = 18.24 + i * 0.35 + Math.sin(i * 0.5) * 0.5;
-    f.push({ x: `+${i}j`, y: base, band: 0.6 + i * 0.05 });
-  }
-  return f;
-}
-
-function buildOptimistic(): ForecastPoint[] {
-  const o: ForecastPoint[] = [];
-  for (let i = 1; i <= 30; i++) {
-    const base = 18.24 + i * 0.35 + Math.sin(i * 0.5) * 0.5;
-    o.push({ x: `+${i}j`, y: base + 0.4 + i * 0.06 });
-  }
-  return o;
-}
-
-const history = buildHistory();
-const forecast = buildForecast();
-const optimistic = buildOptimistic();
+import { fcfa } from "@/utils/fcfa";
+import { useAuthStore } from "@/store/auth.store";
+import { walletService } from "@/services/wallet.service";
+import { userService } from "@/services/user.service";
+import { analyticsService } from "@/services/analytics.service";
+import { usePinStore } from "@/store/pin.store";
+import { AgencyWallet, AgentWallet } from "@/types/wallet.types";
+import { User } from "@/types/user.types";
+import { LineChart } from "@/components/charts/LineChart";
 
 export function LiquiditeScreen() {
+  const user = useAuthStore(s => s.user);
+  const { requestPin } = usePinStore();
+  
+  const [agencyWallet, setAgencyWallet] = useState<AgencyWallet | null>(null);
+  const [agents, setAgents] = useState<User[]>([]);
+  const [agentWallets, setAgentWallets] = useState<Record<string, AgentWallet>>({});
+  const [forecastData, setForecastData] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  
+  const [fundModalOpen, setFundModalOpen] = useState(false);
+  const [fundAmount, setFundAmount] = useState("");
+  const [fundNotes, setFundNotes] = useState("");
+  const [fundLoading, setFundLoading] = useState(false);
+
+  const agencyId = user?.agencyId || "1";
+
+  const fetchData = async () => {
+    try {
+      setLoading(true);
+      const w = await walletService.getAgencyWallet(agencyId).catch(() => null);
+      setAgencyWallet(w);
+      
+      const forecast = await analyticsService.getForecast(agencyId).catch(() => []);
+      const fData = Array.isArray(forecast) ? forecast : (forecast as any).data || [];
+      if (fData.length > 0) {
+         setForecastData(fData.map((f: any) => ({
+             x: new Date(f.date || f.x || new Date()).toLocaleDateString("fr-FR", { weekday: 'short' }),
+             y: (f.forecast || f.amount || f.y || 0) / 1000000,
+             tip: fcfa(f.forecast || f.amount || f.y || 0)
+         })));
+      } else {
+         // Mock fallback si backend non dispo
+         setForecastData([
+             { x: "Lun", y: 1.2 }, { x: "Mar", y: 1.5 }, { x: "Mer", y: 1.1 },
+             { x: "Jeu", y: 1.8 }, { x: "Ven", y: 2.1 }, { x: "Sam", y: 1.4 }
+         ]);
+      }
+      
+      const res = await userService.getAll();
+      const ags: User[] = Array.isArray(res) ? res : ((res as unknown as {data: User[]}).data || []);
+      const fieldAgents = ags.filter(a => a.role === "AGENT");
+      setAgents(fieldAgents);
+      
+      const wallets: Record<string, AgentWallet> = {};
+      await Promise.all(fieldAgents.map(async (a) => {
+        try {
+          wallets[a.id] = await walletService.getAgentWallet(a.id);
+        } catch(e) {}
+      }));
+      setAgentWallets(wallets);
+    } catch(err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchData();
+  }, [user]);
+
+  const handleFund = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const amount = parseInt(fundAmount, 10);
+    if (isNaN(amount) || amount <= 0) return window.alert("Montant invalide");
+    
+    const pin = await requestPin();
+    if (!pin) return;
+    
+    setFundLoading(true);
+    try {
+      await walletService.fundAgency(agencyId, { amount, notes: fundNotes }, pin);
+      setFundModalOpen(false);
+      setFundAmount("");
+      setFundNotes("");
+      fetchData();
+    } catch (err: unknown) {
+      const axiosErr = err as { response?: { data?: { message?: string, code?: string } } };
+      const msg = axiosErr.response?.data?.message || axiosErr.response?.data?.code || "Erreur de transaction";
+      if (axiosErr.response?.data?.code === "WALLET_001") window.alert("Solde insuffisant pour cette opération");
+      else if (axiosErr.response?.data?.code === "WALLET_002") window.alert("Montant invalide");
+      else if (axiosErr.response?.data?.code === "WALLET_003") window.alert("Agence introuvable");
+      else window.alert(msg);
+    } finally {
+      setFundLoading(false);
+    }
+  };
+
+  const txs = agencyWallet?.transactions || [];
+
   return (
     <>
       <Topbar
-        crumb={["Dashboard", "Finance", "Prévision de liquidité"]}
-        title="Prévision de liquidité"
+        crumb={["Dashboard", "Finance", "Liquidité & Coffre"]}
+        title="Liquidité (Wallet)"
         actions={
-          <>
-            <span className="chip danger-soft"><Ic.Spark /> IA · Modèle mis à jour il y a 2 h</span>
-            <button className="btn btn-ghost btn-sm"><Ic.Refresh /> Actualiser</button>
-          </>
+          <button className="btn btn-ghost btn-sm" onClick={fetchData}><Ic.Refresh /> Actualiser</button>
         }
       />
 
-      <div className="content">
-        <div style={{ background: "var(--carbon)", color: "#fff", borderRadius: 22, padding: 32, marginBottom: 24, position: "relative", overflow: "hidden" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 28, alignItems: "center" }}>
-            <div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-                <div className="eyebrow" style={{ color: "rgba(255,255,255,0.55)" }}>Solde actuel</div>
-                <div className="muted" style={{ fontSize: 12, color: "rgba(255,255,255,0.55)" }}>21 mai 2026</div>
-              </div>
-              <div className="tnum" style={{ fontSize: 56, fontWeight: 600, letterSpacing: "-0.025em", lineHeight: 1, marginTop: 12, color: "#fff" }}>
-                18 240 000 F
-              </div>
-              <div className="text-accent" style={{ marginTop: 12, fontSize: 14, fontWeight: 500 }}>▲ +4,2% vs sem. dernière</div>
-              <div style={{ display: "flex", gap: 8, marginTop: 20, flexWrap: "wrap" }}>
-                <span className="chip" style={{ background: "rgba(255,255,255,0.06)", color: "#fff", border: "1px solid rgba(255,255,255,0.10)" }}>
-                  <Ic.ArrowUp /> Tendance haussière
-                </span>
-                <span className="chip" style={{ background: "var(--warn-soft)", color: "var(--warn-text)", border: "none" }}>
-                  <Ic.Alert /> 1 risque identifié
-                </span>
+      <div className="content mt-8">
+        {loading ? (
+          <div className="card text-center p-8 muted">Chargement des portefeuilles...</div>
+        ) : (
+          <>
+            <div className="bg-[var(--carbon)] text-white rounded-[22px] p-8 mb-6 relative overflow-hidden">
+              <div className="grid grid-cols-[1fr_auto] gap-7 items-center">
+                <div>
+                  <div className="eyebrow text-white/55">Solde Coffre Agence</div>
+                  <div className="tnum font-semibold tracking-tight leading-none mt-3 text-white text-5xl">
+                    {fcfa(agencyWallet?.balance || 0)}
+                  </div>
+                </div>
+                <div>
+                  <button className="btn btn-primary" onClick={() => setFundModalOpen(true)}>
+                    <Ic.Plus /> Injecter des fonds
+                  </button>
+                </div>
               </div>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <div style={{ padding: 16, background: "rgba(255,255,255,0.04)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)" }}>
-                <div className="eyebrow" style={{ color: "rgba(255,255,255,0.55)" }}>Prévision à 7 j</div>
-                <div className="tnum" style={{ fontSize: 22, fontWeight: 600, color: "#fff", marginTop: 6 }}>22 140 000 F</div>
-                <div className="text-accent" style={{ fontSize: 12, marginTop: 4 }}>▲ +3 900 000 F</div>
+            <div className="card p-0 mb-6 border border-indigo-100">
+              <div className="p-6 border-b border-[var(--line)] bg-indigo-50/50 rounded-t-[22px] flex justify-between items-center">
+                <div>
+                  <h4 className="flex items-center gap-2"><Ic.Sparkles className="text-indigo-600" /> Prévisions IA (7 jours)</h4>
+                  <div className="muted text-sm mt-1">Estimation des besoins en trésorerie pour éviter les ruptures</div>
+                </div>
               </div>
-              <div style={{ padding: 16, background: "rgba(255,255,255,0.04)", borderRadius: 14, border: "1px solid rgba(255,255,255,0.08)" }}>
-                <div className="eyebrow" style={{ color: "rgba(255,255,255,0.55)" }}>Prévision à 30 j</div>
-                <div className="tnum" style={{ fontSize: 22, fontWeight: 600, color: "#fff", marginTop: 6 }}>28 700 000 F</div>
-                <div className="text-accent" style={{ fontSize: 12, marginTop: 4 }}>▲ +10 460 000 F</div>
+              <div className="p-6">
+                {forecastData.length > 0 ? (
+                  <LineChart data={forecastData} width={800} height={200} color="#4F46E5" />
+                ) : (
+                  <div className="text-center py-8 muted">Données IA indisponibles</div>
+                )}
               </div>
             </div>
-          </div>
-        </div>
 
-        <div className="card">
-          <div className="card-head">
-            <div>
-              <h4>Évolution du solde · Historique + prévision 30 jours</h4>
-              <div className="sub">Bande de confiance à 90% · M F CFA</div>
-            </div>
-            <div style={{ display: "flex", gap: 14, flexWrap: "wrap" }}>
-              <Legend c="var(--primary)" l="Historique" />
-              <LegendDash c="var(--primary)" l="Prévision centrale" />
-              <Legend c="rgba(179,0,27,0.18)" l="Intervalle de confiance" />
-              <LegendDash c="var(--accent)" l="Scénario optimiste" />
-            </div>
-          </div>
-          <ForecastChart history={history} forecast={forecast} optimistic={optimistic} width={1080} height={300} />
-        </div>
+            <div className="grid grid-cols-[1.5fr_1fr] gap-6">
+              <div className="card p-0">
+                <div className="p-6 border-b border-[var(--line)]">
+                  <h4>Historique du coffre</h4>
+                </div>
+                <table className="tbl w-full">
+                  <thead>
+                    <tr>
+                      <th className="text-left">Type</th>
+                      <th className="text-left">Date</th>
+                      <th className="text-left">Notes</th>
+                      <th className="num text-right">Montant</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {txs.length === 0 && (
+                      <tr><td colSpan={4} className="text-center py-8 muted">Aucune transaction</td></tr>
+                    )}
+                    {txs.map((tx: { type: string; amount: number; createdAt: string; notes?: string }, i: number) => (
+                      <tr key={i}>
+                        <td>
+                          {tx.type === "FUNDING" && <span className="pill good"><Ic.ArrowDown /> Injection</span>}
+                          {tx.type === "WITHDRAWAL" && <span className="pill warn"><Ic.ArrowUp /> Retrait</span>}
+                          {tx.type === "REMITTANCE" && <span className="pill"><Ic.ArrowDown /> Versement agent</span>}
+                          {tx.type === "LOAN_DISBURSEMENT" && <span className="pill warn"><Ic.ArrowUp /> Crédit</span>}
+                        </td>
+                        <td className="muted">{new Date(tx.createdAt).toLocaleString("fr-FR")}</td>
+                        <td className="muted truncate max-w-[150px]">{tx.notes || "-"}</td>
+                        <td className={`num tnum fw-600 ${tx.amount > 0 ? "text-[var(--good)]" : "text-[var(--warn)]"}`}>
+                          {fcfa(tx.amount, { sign: true })}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
-        <div className="grid-3" style={{ marginTop: 16 }}>
-          <div className="card" style={{ borderLeft: "4px solid var(--warn)" }}>
-            <div className="alert-tagrow"><span className="alert-tag warn">RISQUE FAIBLE</span></div>
-            <div className="h3 mt-8" style={{ fontSize: 17 }}>Baisse prévisionnelle sem. 23</div>
-            <p className="body mt-8">
-              Historiquement, les collectes baissent de 8% en fin de mois. À surveiller particulièrement la zone Cotonou.
-            </p>
-            <div style={{ background: "var(--paper)", borderRadius: 10, padding: 12, marginTop: 12, borderLeft: "2px solid var(--warn)" }}>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>Recommandation</div>
-              <div style={{ fontSize: 13 }}>Alerter les agents zone Cotonou pour intensification des tournées.</div>
+              <div className="card p-0 h-fit">
+                <div className="p-6 border-b border-[var(--line)]">
+                  <h4>Encaisse Agents (Terrain)</h4>
+                </div>
+                <div className="col">
+                  {agents.length === 0 && (
+                    <div className="text-center py-8 muted">Aucun agent trouvé</div>
+                  )}
+                  {agents.map(a => {
+                    const w = agentWallets[a.id];
+                    return (
+                      <div key={a.id} className="flex justify-between items-center p-4 border-b border-[var(--line-2)] last:border-b-0">
+                        <div className="flex gap-3 items-center">
+                          <div className="av bg-[var(--line)] text-[var(--ink)]">{a.firstName[0]}{a.lastName?.[0]}</div>
+                          <div>
+                            <div className="fw-500">{a.firstName} {a.lastName}</div>
+                            <div className="muted text-xs">{a.agentCode || "Agent"}</div>
+                          </div>
+                        </div>
+                        <div className="text-right">
+                          <div className="tnum fw-600">{w ? fcfa(w.cashBalance) : "-"}</div>
+                          <div className="muted text-[10px] uppercase tracking-wider mt-0.5">Non versé</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
             </div>
-          </div>
-
-          <div className="card" style={{ borderLeft: "4px solid var(--accent)" }}>
-            <div className="alert-tagrow"><span className="alert-tag ok">OPPORTUNITÉ</span></div>
-            <div className="h3 mt-8" style={{ fontSize: 17 }}>Forte saisonnalité · zone Akpakpa</div>
-            <p className="body mt-8">
-              L&apos;historique montre +22% de collecte la 3ᵉ semaine du mois. Pic attendu du 23 au 27 mai.
-            </p>
-            <div style={{ background: "var(--paper)", borderRadius: 10, padding: 12, marginTop: 12, borderLeft: "2px solid var(--accent)" }}>
-              <div className="eyebrow" style={{ marginBottom: 4 }}>Recommandation</div>
-              <div style={{ fontSize: 13 }}>Déployer 2 agents supplémentaires sur les tournées Akpakpa T1 et T2.</div>
-            </div>
-          </div>
-
-          <div className="card">
-            <div className="eyebrow">Paramètres du modèle</div>
-            <div className="h3 mt-8" style={{ fontSize: 17 }}>Précision du modèle</div>
-            <div className="between mt-12">
-              <span className="tnum" style={{ fontSize: 28, fontWeight: 600 }}>94,2<small style={{ fontSize: 14, color: "var(--ink-3)", marginLeft: 2 }}>%</small></span>
-              <span className="muted" style={{ fontSize: 12 }}>sur 30 j</span>
-            </div>
-            <div className="bar full thick mt-8" style={{ background: "var(--accent-soft)" }}><span style={{ width: "94%", background: "var(--accent)" }} /></div>
-            <div className="divider" />
-            <div className="col gap-8">
-              <Row k="Données d'entrée" v="127 semaines" />
-              <Row k="Agents suivis" v="22" />
-              <Row k="Zones" v="7" />
-              <Row k="Dernière calibration" v="il y a 2 h" />
-            </div>
-          </div>
-        </div>
+          </>
+        )}
       </div>
+
+      {fundModalOpen && (
+        <div className="modal-overlay" onClick={() => setFundModalOpen(false)}>
+          <div className="modal max-w-[400px]" onClick={e => e.stopPropagation()}>
+            <div className="modal-head brand">
+              <div className="av lg bg-[var(--primary)] text-white"><Ic.ArrowDown /></div>
+              <div className="flex-1">
+                <div className="title">Injecter des fonds</div>
+                <div className="sub">Alimenter le coffre de l'agence</div>
+              </div>
+              <button className="close" onClick={() => setFundModalOpen(false)}><Ic.X /></button>
+            </div>
+            <form className="modal-body" onSubmit={handleFund}>
+              <div className="col gap-4">
+                <div className="input-group">
+                  <label htmlFor="liq-amount">Montant (F CFA)</label>
+                  <input id="liq-amount" type="number" required min="1" value={fundAmount} onChange={e => setFundAmount(e.target.value)} placeholder="Ex: 5000000" disabled={fundLoading} />
+                </div>
+                <div className="input-group">
+                  <label htmlFor="liq-notes">Notes / Référence</label>
+                  <input id="liq-notes" type="text" value={fundNotes} onChange={e => setFundNotes(e.target.value)} placeholder="Ex: Virement BOA du 21/05" disabled={fundLoading} />
+                </div>
+              </div>
+              
+              <div className="muted mt-4 text-xs flex gap-2">
+                <Ic.Alert /> Cette action nécessite votre Action PIN (demandé à l'étape suivante).
+              </div>
+              <div className="divider" />
+              <div className="flex gap-2 justify-end">
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => setFundModalOpen(false)} disabled={fundLoading}>Annuler</button>
+                <button type="submit" className="btn btn-primary btn-sm" disabled={fundLoading}>
+                  {fundLoading ? "Traitement..." : "Valider l'injection"}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

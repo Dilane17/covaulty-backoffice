@@ -44,6 +44,8 @@ import {
   Trash2 as LuTrash,
   Upload as LuUpload,
   Sparkles as LuSpark,
+  Trophy as LuTrophy,
+  Medal as LuMedal,
 } from "lucide-react";
 
 export const Ic = {
@@ -92,6 +94,8 @@ export const Ic = {
   Trash:  () => <LuTrash  size={14} strokeWidth={1.6} />,
   Upload: () => <LuUpload size={14} strokeWidth={1.6} />,
   Spark:  () => <LuSpark  size={14} strokeWidth={1.6} />,
+  Trophy: () => <LuTrophy size={14} strokeWidth={1.6} />,
+  Medal:  () => <LuMedal  size={14} strokeWidth={1.6} />,
 };
 
 export type IcKey = keyof typeof Ic;
